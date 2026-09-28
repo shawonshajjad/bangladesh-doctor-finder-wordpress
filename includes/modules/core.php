@@ -23,6 +23,9 @@ function dr_finder_v37_full_init() {
         'supports' => array('title', 'thumbnail'),
         'menu_icon' => 'dashicons-businessman',
         'has_archive' => true,
+        'show_in_rest' => true,
+        'capability_type' => array('doctor','doctors'),
+        'map_meta_cap' => true,
     ));
 
     register_taxonomy('manual_div', 'doctor', array('label' => 'বিভাগ (Manual)', 'hierarchical' => true, 'show_ui' => true, 'show_admin_column' => true));
@@ -56,6 +59,7 @@ add_action('add_meta_boxes', function(){
 });
 
 function dr_meta_html_v37($post) {
+    wp_nonce_field('bdf_save_doctor','bdf_doctor_nonce');
     $bd_data = get_bd_hardcoded_database_full();
     $fields = array(
         'designation' => 'পদবি', 'workplace' => 'হাসপাতাল', 'clinic' => 'চেম্বার',
@@ -83,7 +87,7 @@ function dr_meta_html_v37($post) {
     ?>
     <script>
     jQuery(document).ready(function($){
-        var db = <?php echo json_encode($bd_data); ?>;
+        var db = <?php echo wp_json_encode($bd_data); ?>;
         $('#be-div').on('change', function(){
             var div = $(this).val(), h = '<option value="">জেলা সিলেক্ট করুন</option>';
             if(db[div]) $.each(db[div], function(dst){ h += '<option value="'+dst+'">'+dst+'</option>'; });
@@ -99,16 +103,15 @@ function dr_meta_html_v37($post) {
     <?php
 }
 
-add_action('save_post', function($post_id){
+add_action('save_post_doctor', function($post_id){
     if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) return;
-    $meta = array('designation','workplace','clinic','phone','address','map_link','division','district','upazila','facebook_link','vbac_support','experience');
-    foreach($meta as $m) {
-        if(isset($_POST[$m])) {
-            update_post_meta($post_id, $m, sanitize_text_field($_POST[$m]));
-        } elseif($m == 'vbac_support') {
-            delete_post_meta($post_id, 'vbac_support');
-        }
-    }
+    if (!isset($_POST['bdf_doctor_nonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['bdf_doctor_nonce'])),'bdf_save_doctor')) return;
+    if (!current_user_can('edit_post',$post_id)) return;
+    $text=array('designation','workplace','clinic','phone','address','division','district','upazila');
+    foreach($text as $m) if(isset($_POST[$m])) update_post_meta($post_id,$m,sanitize_text_field(wp_unslash($_POST[$m])));
+    foreach(array('map_link','facebook_link') as $m) if(isset($_POST[$m])) update_post_meta($post_id,$m,esc_url_raw(wp_unslash($_POST[$m])));
+    if(isset($_POST['experience'])) update_post_meta($post_id,'experience',absint($_POST['experience']));
+    if(isset($_POST['vbac_support'])) update_post_meta($post_id,'vbac_support','1'); else delete_post_meta($post_id,'vbac_support');
 });
 
 // ৪. CSV Import
@@ -116,10 +119,19 @@ add_action('admin_menu', function(){
     add_submenu_page('edit.php?post_type=doctor', 'Import CSV', 'Import CSV', 'manage_options', 'dr-csv', 'dr_import_v37_page');
 });
 function dr_import_v37_page() {
+    if (!current_user_can('manage_options')) wp_die(esc_html__('Forbidden','bangladesh-doctor-finder'));
     if (isset($_POST['up_csv']) && !empty($_FILES['csv_f']['tmp_name'])) {
+        check_admin_referer('dr_import_csv','dr_import_nonce');
+        if (!isset($_FILES['csv_f']['error']) || UPLOAD_ERR_OK !== (int) $_FILES['csv_f']['error']) { echo '<div class="notice notice-error"><p>Upload failed.</p></div>'; return; }
+        if ((int) $_FILES['csv_f']['size'] > 2 * MB_IN_BYTES) { echo '<div class="notice notice-error"><p>CSV is too large.</p></div>'; return; }
+        $ext = strtolower(pathinfo(sanitize_file_name($_FILES['csv_f']['name']), PATHINFO_EXTENSION));
+        if ('csv' !== $ext) { echo '<div class="notice notice-error"><p>Please upload a CSV file.</p></div>'; return; }
         $f = fopen($_FILES['csv_f']['tmp_name'], "r"); fgetcsv($f); $c = 0;
         while (($r = fgetcsv($f, 1000, ",")) !== FALSE) {
+            if (count($r) < 9 || empty(trim($r[0]))) continue;
+            $r = array_map('sanitize_text_field',$r);
             $pid = wp_insert_post(array('post_title' => $r[0], 'post_type' => 'doctor', 'post_status' => 'publish'));
+            if (is_wp_error($pid) || !$pid) continue;
             update_post_meta($pid, 'designation', $r[1]); update_post_meta($pid, 'workplace', $r[2]);
             update_post_meta($pid, 'clinic', $r[3]);      update_post_meta($pid, 'phone', $r[4]);
             update_post_meta($pid, 'division', $r[5]);    update_post_meta($pid, 'district', $r[6]);
@@ -132,6 +144,6 @@ function dr_import_v37_page() {
         fclose($f); echo "<div class='updated'><p>$c Doctors Imported!</p></div>";
     }
     ?>
-    <div class="wrap"><h1>Import CSV</h1><form method="post" enctype="multipart/form-data"><input type="file" name="csv_f"><input type="submit" name="up_csv" class="button button-primary" value="Import Now"></form></div>
+    <div class="wrap"><h1>Import CSV</h1><form method="post" enctype="multipart/form-data"><?php wp_nonce_field("dr_import_csv","dr_import_nonce"); ?><input type="file" name="csv_f" accept=".csv,text/csv" required><input type="submit" name="up_csv" class="button button-primary" value="Import Now"></form></div>
     <?php
 }
