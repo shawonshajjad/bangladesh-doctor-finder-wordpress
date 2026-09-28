@@ -23,6 +23,9 @@ function dr_finder_v37_full_init() {
         'supports' => array('title', 'thumbnail'),
         'menu_icon' => 'dashicons-businessman',
         'has_archive' => true,
+        'show_in_rest' => true,
+        'capability_type' => array('doctor','doctors'),
+        'map_meta_cap' => true,
     ));
 
     register_taxonomy('manual_div', 'doctor', array('label' => 'বিভাগ (Manual)', 'hierarchical' => true, 'show_ui' => true, 'show_admin_column' => true));
